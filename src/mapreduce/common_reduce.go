@@ -3,7 +3,7 @@ package mapreduce
 import (
 	"os"
 	"encoding/json"
-	"fmt"
+	"log"
 	"sort"
 )
 
@@ -43,14 +43,15 @@ func doReduce(
 		inFileName := reduceName(jobName, i, reduceTaskNumber)
 		inFile, err := os.Open(inFileName)
 		if err != nil {
-			fmt.Println(err)
+			log.Fatal(err)
+			return
 		}
 		dec := json.NewDecoder(inFile)
 		for dec.More() {
 			var kv KeyValue
 			err = dec.Decode(&kv)
 			if err != nil {
-				fmt.Println(err)
+				log.Fatal(err)
 				return
 			}
 			m[kv.Key] = append(m[kv.Key], kv.Value)
@@ -65,7 +66,7 @@ func doReduce(
 	outFileName := mergeName(jobName, reduceTaskNumber)
 	outFile, err := os.Create(outFileName)
 	if err != nil {
-		fmt.Println(err)
+		log.Fatal(err)
 		return
 	}
 	enc := json.NewEncoder(outFile)

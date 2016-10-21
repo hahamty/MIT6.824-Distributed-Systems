@@ -5,7 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"encoding/json"
-	"fmt"
+	"log"
 )
 
 // doMap does the job of a map worker: it reads one of the input files
@@ -46,7 +46,7 @@ func doMap(
 	// Remember to close the file after you have written all the values!
 	inBytes, err := ioutil.ReadFile(inFile)
 	if err != nil {
-		fmt.Println(err)
+		log.Fatal(err)
 		return
 	}
 	contents := string(inBytes)
@@ -55,7 +55,8 @@ func doMap(
 		outFileName := reduceName(jobName, mapTaskNumber, i)
 		outFile, err := os.Create(outFileName)
 		if err != nil {
-
+			log.Fatal(err)
+			return
 		}
 		enc := json.NewEncoder(outFile)
 		for _, kv := range kvs {
