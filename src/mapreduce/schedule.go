@@ -32,13 +32,17 @@ func (mr *Master) schedule(phase jobPhase) {
 		fmt.Printf("len: %d\n", len(mr.files))
 		go func(mr *Master, phase jobPhase, i int, nios int) {
 			defer wg.Done()
-			worker := <-mr.registerChannel
 			doTaskArgs := DoTaskArgs{mr.jobName, mr.files[i], phase, i, nios}
-			call(worker, "Worker.DoTask", doTaskArgs, new(struct{}))
-			// Must use go func, or will be deadlocked
-			go func(mr *Master, worker string) {
-				mr.registerChannel <- worker
-			}(mr, worker)
+			for worker := range mr.registerChannel {
+				success := call(worker, "Worker.DoTask", doTaskArgs, new(struct{}))
+				if success {
+					// Must use go func, or will be deadlocked
+					go func(mr *Master, worker string) {
+						mr.registerChannel <- worker
+					}(mr, worker)
+					break
+				}
+			}
 		}(mr, phase, i, nios)
 	}
 	wg.Wait()
