@@ -1,9 +1,9 @@
 package mapreduce
 
 import (
-	"os"
 	"encoding/json"
 	"log"
+	"os"
 	"sort"
 )
 
@@ -38,7 +38,7 @@ func doReduce(
 	// 	enc.Encode(KeyValue{key, reduceF(...)})
 	// }
 	// file.Close()
-	m := make(map[string] []string)
+	m := make(map[string][]string)
 	for i := 0; i < nMap; i++ {
 		inFileName := reduceName(jobName, i, reduceTaskNumber)
 		inFile, err := os.Open(inFileName)
@@ -59,7 +59,7 @@ func doReduce(
 		inFile.Close()
 	}
 	var keys []string
-	for key, _ := range m {
+	for key := range m {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
