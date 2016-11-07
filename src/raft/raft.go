@@ -19,11 +19,11 @@ package raft
 
 import "sync"
 import "labrpc"
+import "time"
+import "math/rand"
 
 // import "bytes"
 // import "encoding/gob"
-
-
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -36,6 +36,19 @@ type ApplyMsg struct {
 	UseSnapshot bool   // ignore for lab2; only used in lab3
 	Snapshot    []byte // ignore for lab2; only used in lab3
 }
+
+type Log struct {
+	term    int
+	command interface{}
+}
+
+type raftStateType uint8
+
+const (
+	FOLLWER raftStateType = iota
+	CANDIDATE
+	LEADER
+)
 
 //
 // A Go object implementing a single Raft peer.
@@ -50,6 +63,84 @@ type Raft struct {
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
+	raftState raftStateType
+
+	// Persistent state on all servers
+	currentTerm int
+	voteFor     int
+	// logs        []Log
+
+	// // Volatile state on all servers
+	// commitIndex int
+	// lastApplied int
+
+	// // Volatile state on leaders
+	// nextIndex  []int
+	// matchIndex []int
+
+	// Election
+	votes int
+	timer *time.Timer
+}
+
+func (rf *Raft) Loop() {
+	for {
+		<-rf.timer.C
+		rf.mu.Lock()
+		if rf.raftState == LEADER {
+			rf.ResetTimeout(25, 50)
+		} else if rf.raftState == CANDIDATE {
+			rf.ResetTimeout(50, 150)
+			rf.currentTerm++
+			rf.voteFor = rf.me
+			rf.votes = 1
+		} else if rf.raftState == FOLLWER {
+			// fmt.Printf("%d becomes candidate\n", rf.me)
+			rf.raftState = CANDIDATE
+			rf.ResetTimeout(50, 150)
+			rf.currentTerm++
+			rf.voteFor = rf.me
+			rf.votes = 1
+		}
+		rf.mu.Unlock()
+		if rf.raftState == LEADER {
+			rf.BroadcastHeartbeat()
+		} else if rf.raftState == CANDIDATE {
+			rf.BroadcastRequestVote()
+		}
+	}
+}
+
+func (rf *Raft) ResetTimeout(minimumMillisecond int64, maximumMillisecond int64) {
+	timeout := rand.Int63n(maximumMillisecond-minimumMillisecond) + minimumMillisecond
+	ok := rf.timer.Reset(time.Duration(timeout) * time.Millisecond)
+	if !ok {
+		rf.timer = time.NewTimer(time.Duration(timeout) * time.Millisecond)
+	}
+}
+
+func (rf *Raft) BroadcastRequestVote() {
+	for i := 0; i < len(rf.peers); i++ {
+		if i != rf.me {
+			go func(server int) {
+				args := RequestVoteArgs{rf.currentTerm, rf.me}
+				reply := &RequestVoteReply{}
+				rf.sendRequestVote(server, args, reply)
+			}(i)
+		}
+	}
+}
+
+func (rf *Raft) BroadcastHeartbeat() {
+	for i := 0; i < len(rf.peers); i++ {
+		if i != rf.me {
+			go func(server int) {
+				args := AppendEntriesArgs{rf.currentTerm}
+				reply := &AppendEntriesReply{}
+				rf.SendAppendEntries(server, args, reply)
+			}(i)
+		}
+	}
 }
 
 // return currentTerm and whether this server
@@ -57,9 +148,12 @@ type Raft struct {
 func (rf *Raft) GetState() (int, bool) {
 
 	var term int
-	var isleader bool
+	var isLeader bool
 	// Your code here.
-	return term, isleader
+	if rf.raftState == LEADER {
+		isLeader = true
+	}
+	return term, isLeader
 }
 
 //
@@ -90,21 +184,25 @@ func (rf *Raft) readPersist(data []byte) {
 	// d.Decode(&rf.yyy)
 }
 
-
-
-
 //
 // example RequestVote RPC arguments structure.
 //
 type RequestVoteArgs struct {
 	// Your data here.
+	Term        int
+	CandidateID int
+	// LastLogIndex int
+	// LastLogTerm  int
 }
 
 //
 // example RequestVote RPC reply structure.
 //
+// Using GOB requires capitalized
 type RequestVoteReply struct {
 	// Your data here.
+	Term        int
+	VoteGranted bool
 }
 
 //
@@ -112,6 +210,30 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here.
+	rf.ResetTimeout(150, 300)
+	rf.mu.Lock()
+	if args.Term > rf.currentTerm {
+		// fmt.Printf("%d becomes follower\n", rf.me)
+		rf.raftState = FOLLWER
+		rf.currentTerm = args.Term
+		rf.voteFor = args.CandidateID
+	}
+	rf.mu.Unlock()
+	reply.Term = rf.currentTerm
+	if args.Term < rf.currentTerm {
+		reply.VoteGranted = false
+		return
+	}
+	rf.mu.Lock()
+	if rf.voteFor == -1 {
+		rf.voteFor = args.CandidateID
+	}
+	rf.mu.Unlock()
+	if rf.voteFor == args.CandidateID {
+		reply.VoteGranted = true
+		return
+	}
+	reply.VoteGranted = false
 }
 
 //
@@ -133,9 +255,58 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 //
 func (rf *Raft) sendRequestVote(server int, args RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
+	if ok {
+		if reply.VoteGranted {
+			rf.mu.Lock()
+			rf.votes++
+			if rf.votes*2 > len(rf.peers) && rf.raftState == CANDIDATE {
+				// fmt.Printf("%d becomes leader\n", rf.me)
+				rf.raftState = LEADER
+				rf.ResetTimeout(0, 50)
+				rf.BroadcastHeartbeat()
+			}
+			rf.mu.Unlock()
+		}
+	}
 	return ok
 }
 
+type AppendEntriesArgs struct {
+	Term int
+}
+
+type AppendEntriesReply struct {
+	Term int
+}
+
+func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {
+	rf.mu.Lock()
+	rf.ResetTimeout(150, 300)
+	if args.Term > rf.currentTerm {
+		// fmt.Printf("%d becomes follower\n", rf.me)
+		rf.raftState = FOLLWER
+		rf.currentTerm = args.Term
+		rf.voteFor = -1
+	}
+	rf.mu.Unlock()
+	reply.Term = rf.currentTerm
+}
+
+func (rf *Raft) SendAppendEntries(server int, args AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	if ok {
+		rf.mu.Lock()
+		if reply.Term > rf.currentTerm {
+			// fmt.Printf("%d becomes follower\n", rf.me)
+			rf.ResetTimeout(150, 300)
+			rf.raftState = FOLLWER
+			rf.currentTerm = reply.Term
+			rf.voteFor = -1
+		}
+		rf.mu.Unlock()
+	}
+	return ok
+}
 
 //
 // the service using Raft (e.g. a k/v server) wants to start
@@ -154,7 +325,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
 	term := -1
 	isLeader := true
-
 
 	return index, term, isLeader
 }
@@ -188,10 +358,14 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here.
+	timeout := rand.Int31n(150) + 150
+	rf.timer = time.NewTimer(time.Duration(timeout) * time.Millisecond)
+	// rf.commitIndex = -1
+	rf.raftState = FOLLWER
+	go rf.Loop()
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-
 
 	return rf
 }
