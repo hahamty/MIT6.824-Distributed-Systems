@@ -513,7 +513,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.CurrentTerm = 0
 	rf.VoteFor = -1
 	rf.Logs = make([]Log, 1)
-	rf.Logs[0] = Log{0, 0}
+	rf.Logs[0] = Log{Term: 0}
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 	rf.nextIndex = make([]int, len(rf.peers))
