@@ -3,11 +3,15 @@ package raftkv
 import "labrpc"
 import "crypto/rand"
 import "math/big"
-
+import "sync"
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
+	me int64
+
+	mu        sync.Mutex
+	timestamp uint
 }
 
 func nrand() int64 {
@@ -21,6 +25,8 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 	// You'll have to add code here.
+	ck.me = nrand()
+	ck.timestamp = 1
 	return ck
 }
 
@@ -39,7 +45,27 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) Get(key string) string {
 
 	// You will have to modify this function.
-	return ""
+	ck.mu.Lock()
+	timestamp := ck.timestamp
+	ck.timestamp++
+	ck.mu.Unlock()
+	for {
+		for _, server := range ck.servers {
+			args := GetArgs{key, ck.me, timestamp}
+			reply := GetReply{}
+			ok := server.Call("RaftKV.Get", &args, &reply)
+			if ok {
+				if !reply.WrongLeader {
+					switch reply.Err {
+					case OK:
+						return reply.Value
+					case ErrNoKey:
+						return ""
+					}
+				}
+			}
+		}
+	}
 }
 
 //
@@ -54,6 +80,22 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
+	ck.mu.Lock()
+	timestamp := ck.timestamp
+	ck.timestamp++
+	ck.mu.Unlock()
+	for {
+		for _, server := range ck.servers {
+			args := PutAppendArgs{key, value, op, ck.me, timestamp}
+			reply := PutAppendReply{}
+			ok := server.Call("RaftKV.PutAppend", &args, &reply)
+			if ok {
+				if !reply.WrongLeader {
+					return
+				}
+			}
+		}
+	}
 }
 
 func (ck *Clerk) Put(key string, value string) {
