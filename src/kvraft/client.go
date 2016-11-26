@@ -11,7 +11,7 @@ type Clerk struct {
 	me int64
 
 	mu        sync.Mutex
-	timestamp uint
+	timestamp int
 }
 
 func nrand() int64 {

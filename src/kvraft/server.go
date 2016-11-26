@@ -26,7 +26,7 @@ type Op struct {
 	Value     string
 	Operation string
 	ClientID  int64
-	Timestamp uint
+	Timestamp int
 }
 
 type RaftKV struct {
@@ -40,7 +40,7 @@ type RaftKV struct {
 	// Your definitions here.
 	kvDB             map[string]string
 	appliedChans     map[int]chan Op
-	clientTimestamps map[int64]uint
+	clientTimestamps map[int64]int
 }
 
 func (kv *RaftKV) Loop() {
@@ -151,7 +151,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// Your initialization code here.
 	kv.kvDB = make(map[string]string)
 	kv.appliedChans = make(map[int]chan Op)
-	kv.clientTimestamps = make(map[int64]uint)
+	kv.clientTimestamps = make(map[int64]int)
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)

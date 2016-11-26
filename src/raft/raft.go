@@ -55,10 +55,12 @@ const (
 	LEADER
 )
 
+type eventType uint
+
 const (
-	HeartbeatEvent uint8 = iota
-	BecomeLeaderEvent
-	BroadcastSentEvent
+	EventHeartbeat eventType = iota
+	EventBecomeLeader
+	EventBroadcastSent
 )
 
 //
@@ -91,7 +93,7 @@ type Raft struct {
 
 	// Election
 	votes     int
-	eventChan chan uint8
+	eventChan chan eventType
 
 	// Applying to service
 	applyCh chan ApplyMsg
@@ -204,13 +206,13 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here.
 	reply.VoteGranted = false
-	rf.mu.Lock()
-	defer rf.persist()
-	defer rf.mu.Unlock()
 	if args.Term < rf.CurrentTerm {
 		reply.Term = rf.CurrentTerm
 		return
 	}
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	defer rf.persist()
 	if args.Term > rf.CurrentTerm {
 		rf.raftState = FOLLOWER
 		rf.CurrentTerm = args.Term
@@ -229,7 +231,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 		reply.VoteGranted = true
 		rf.raftState = FOLLOWER
 		go func() {
-			rf.eventChan <- HeartbeatEvent
+			rf.eventChan <- EventHeartbeat
 		}()
 		return
 	}
@@ -276,7 +278,7 @@ func (rf *Raft) sendRequestVote(server int, args RequestVoteArgs, reply *Request
 				rf.VoteFor = -1
 				rf.persist()
 				go func() {
-					rf.eventChan <- HeartbeatEvent
+					rf.eventChan <- EventHeartbeat
 				}()
 			}
 		}
@@ -317,13 +319,12 @@ type AppendEntriesReply struct {
 
 func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {
 	reply.Success = false
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
 	if args.Term < rf.CurrentTerm {
 		reply.Term = rf.CurrentTerm
-		reply.Success = false
 		return
 	}
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	rf.raftState = FOLLOWER
 	if args.Term > rf.CurrentTerm {
 		rf.CurrentTerm = args.Term
@@ -331,7 +332,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		rf.persist()
 	}
 	go func() {
-		rf.eventChan <- HeartbeatEvent
+		rf.eventChan <- EventHeartbeat
 	}()
 	reply.Term = args.Term
 	if len(rf.Logs) <= args.PrevLogIndex {
@@ -431,7 +432,7 @@ func (rf *Raft) BroadcastAppendEntries() {
 			}
 		}
 		go func() {
-			rf.eventChan <- BroadcastSentEvent
+			rf.eventChan <- EventBroadcastSent
 		}()
 	}
 }
@@ -522,7 +523,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		rf.nextIndex[i] = 1
 		rf.matchIndex[i] = 0
 	}
-	rf.eventChan = make(chan uint8)
+	rf.eventChan = make(chan eventType)
 	rf.applyCh = applyCh
 
 	// initialize from state persisted before a crash
