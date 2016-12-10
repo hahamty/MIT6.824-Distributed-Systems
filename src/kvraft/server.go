@@ -1,6 +1,7 @@
 package raftkv
 
 import (
+	"bytes"
 	"encoding/gob"
 	"labrpc"
 	"log"
@@ -38,40 +39,54 @@ type RaftKV struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
-	kvDB             map[string]string
+	DB               map[string]string
 	appliedChans     map[int]chan Op
-	clientTimestamps map[int64]int
+	ClientTimestamps map[int64]int
 }
 
 func (kv *RaftKV) Loop() {
 	for {
 		applyMsg := <-kv.applyCh
-		op := applyMsg.Command.(Op)
 		kv.mu.Lock()
-		if kv.clientTimestamps[op.ClientID] < op.Timestamp {
-			switch op.Operation {
-			case "Put":
-				kv.kvDB[op.Key] = op.Value
-			case "Append":
-				kv.kvDB[op.Key] += op.Value
-			case "Get":
+		if applyMsg.UseSnapshot {
+			r := bytes.NewBuffer(applyMsg.Snapshot)
+			d := gob.NewDecoder(r)
+			d.Decode(&kv.DB)
+			d.Decode(&kv.ClientTimestamps)
+		} else {
+			op := applyMsg.Command.(Op)
+			if kv.ClientTimestamps[op.ClientID] < op.Timestamp {
+				switch op.Operation {
+				case "Put":
+					kv.DB[op.Key] = op.Value
+				case "Append":
+					kv.DB[op.Key] += op.Value
+				case "Get":
+				}
+				kv.ClientTimestamps[op.ClientID] = op.Timestamp
 			}
-			kv.clientTimestamps[op.ClientID] = op.Timestamp
+			go func(applyMsg raft.ApplyMsg) {
+				kv.mu.Lock()
+				appliedChan, ok := kv.appliedChans[applyMsg.Index]
+				kv.mu.Unlock()
+				if ok {
+					appliedChan <- applyMsg.Command.(Op)
+				}
+			}(applyMsg)
+			if kv.maxraftstate > 0 && kv.rf.GetRaftStateSize() > kv.maxraftstate {
+				w := new(bytes.Buffer)
+				e := gob.NewEncoder(w)
+				e.Encode(kv.DB)
+				e.Encode(kv.ClientTimestamps)
+				data := w.Bytes()
+				go kv.rf.StartSnapshot(data, applyMsg.Index)
+			}
 		}
 		kv.mu.Unlock()
-		go func(applyMsg raft.ApplyMsg) {
-			kv.mu.Lock()
-			appliedChan, ok := kv.appliedChans[applyMsg.Index]
-			kv.mu.Unlock()
-			if ok {
-				appliedChan <- applyMsg.Command.(Op)
-			}
-		}(applyMsg)
 	}
 }
 
 func (kv *RaftKV) AppendNewEntries(op Op) bool {
-	// DPrintf("Ready to AppendNewEntries: %v\n", op)
 	index, _, isLeader := kv.rf.Start(op)
 	if !isLeader {
 		return false
@@ -86,7 +101,7 @@ func (kv *RaftKV) AppendNewEntries(op Op) bool {
 	select {
 	case appliedOp := <-appliedChan:
 		return appliedOp == op
-	case <-time.After(300 * time.Millisecond):
+	case <-time.After(150 * time.Millisecond):
 		return false
 	}
 }
@@ -98,7 +113,7 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 		reply.WrongLeader = false
 		kv.mu.Lock()
 		defer kv.mu.Unlock()
-		if val, ok := kv.kvDB[args.Key]; ok {
+		if val, ok := kv.DB[args.Key]; ok {
 			reply.Err = OK
 			reply.Value = val
 		} else {
@@ -149,9 +164,9 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.maxraftstate = maxraftstate
 
 	// Your initialization code here.
-	kv.kvDB = make(map[string]string)
+	kv.DB = make(map[string]string)
 	kv.appliedChans = make(map[int]chan Op)
-	kv.clientTimestamps = make(map[int64]int)
+	kv.ClientTimestamps = make(map[int64]int)
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
