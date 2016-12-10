@@ -44,6 +44,7 @@ type ApplyMsg struct {
 // Using GOB needs capitalized
 type Log struct {
 	Term    int
+	Index   int
 	Command interface{}
 }
 
@@ -320,6 +321,7 @@ type AppendEntriesReply struct {
 func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {
 	reply.Success = false
 	if args.Term < rf.CurrentTerm {
+		reply.NextIndex = args.PrevLogIndex + 1
 		reply.Term = rf.CurrentTerm
 		return
 	}
@@ -407,9 +409,7 @@ func (rf *Raft) SendAppendEntries(server int, args AppendEntriesArgs, reply *App
 				rf.VoteFor = -1
 				rf.persist()
 			} else {
-				if reply.NextIndex <= rf.matchIndex[server] {
-					rf.nextIndex[server] = rf.matchIndex[server] + 1
-				} else {
+				if rf.raftState == LEADER {
 					rf.nextIndex[server] = reply.NextIndex
 				}
 			}
@@ -473,7 +473,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader = rf.raftState == LEADER
 	if rf.raftState == LEADER {
 		index = len(rf.Logs)
-		rf.Logs = append(rf.Logs, Log{rf.CurrentTerm, command})
+		rf.Logs = append(rf.Logs, Log{rf.CurrentTerm, index, command})
 		rf.persist()
 		go rf.BroadcastAppendEntries()
 	}
@@ -514,7 +514,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.CurrentTerm = 0
 	rf.VoteFor = -1
 	rf.Logs = make([]Log, 1)
-	rf.Logs[0] = Log{Term: 0}
+	rf.Logs[0] = Log{Term: 0, Index: 0}
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 	rf.nextIndex = make([]int, len(rf.peers))
