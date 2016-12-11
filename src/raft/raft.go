@@ -538,7 +538,7 @@ func (rf *Raft) StartSnapshot(dbData []byte, LastIncludedIndex int) {
 		e.Encode(LastIncludedIndex)
 		e.Encode(LastIncludedTerm)
 		data := w.Bytes()
-		data = append(dbData, data...)
+		data = append(data, dbData...)
 		rf.persister.SaveSnapshot(data)
 		rf.lastApplied = LastIncludedIndex
 		rf.TruncateLog(LastIncludedIndex, LastIncludedTerm)
@@ -550,14 +550,10 @@ func (rf *Raft) ReadSnapshot(snapshot []byte) {
 	if len(snapshot) <= 0 {
 		return
 	}
-	var DB map[string]string
-	var ClientTimestamps map[int64]int
 	var LastIncludedIndex int
 	var LastIncludedTerm int
 	r := bytes.NewBuffer(snapshot)
 	d := gob.NewDecoder(r)
-	d.Decode(&DB)
-	d.Decode(&ClientTimestamps)
 	d.Decode(&LastIncludedIndex)
 	d.Decode(&LastIncludedTerm)
 	rf.lastApplied = LastIncludedIndex

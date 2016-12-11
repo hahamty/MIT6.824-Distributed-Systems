@@ -49,8 +49,12 @@ func (kv *RaftKV) Loop() {
 		applyMsg := <-kv.applyCh
 		kv.mu.Lock()
 		if applyMsg.UseSnapshot {
+			var LastIncludedIndex int
+			var LastIncludedTerm int
 			r := bytes.NewBuffer(applyMsg.Snapshot)
 			d := gob.NewDecoder(r)
+			d.Decode(&LastIncludedIndex)
+			d.Decode(&LastIncludedTerm)
 			d.Decode(&kv.DB)
 			d.Decode(&kv.ClientTimestamps)
 		} else {
